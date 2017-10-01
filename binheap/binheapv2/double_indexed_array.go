@@ -15,11 +15,10 @@ const (
 )
 
 type BinheapOptimized struct {
-	Tree          []*Node
-	maxIndex      int
-	minIndex      int
-	allocStrategy HeapAllocationStrategy
-	keyLookup     map[string]int
+	Tree      []*Node
+	maxIndex  int
+	minIndex  int
+	keyLookup map[string]int
 	sync.Mutex
 }
 
@@ -29,18 +28,6 @@ func NewBinheapOptimized(maxSize int) *BinheapOptimized {
 		minIndex:  0,
 		Tree:      make([]*Node, maxSize),
 		keyLookup: make(map[string]int),
-	}
-}
-
-// NewDoubleIndexArrayReallocate handles intiailizing a new dia object which is able to
-// reallocate itself.
-func NewBinheapOptimizedReallocate(maxSize int) *BinheapOptimized {
-	return &BinheapOptimized{
-		maxIndex:      0,
-		minIndex:      0,
-		Tree:          make([]*Node, maxSize),
-		keyLookup:     make(map[string]int),
-		allocStrategy: Realloc,
 	}
 }
 
@@ -71,35 +58,68 @@ func (d *BinheapOptimized) MinNode() *Node {
 
 func (d *BinheapOptimized) Insert(newNode *Node) *Node {
 	d.Lock()
+
 	if d.IsEmpty() {
-		d.Tree[0] = newNode
-		d.maxIndex = 0
-		d.minIndex = 0
-	} else if d.maxIndex == d.minIndex && !d.IsEmpty() {
-		if compareTimeouts(d.Tree[d.maxIndex].Timeout, newNode.Timeout) {
-			d.Tree[safeIndex(cap(d.Tree), d.maxIndex, DECREMENT)] = newNode
-			d.minIndex--
-		} else {
-			d.Tree[safeIndex(cap(d.Tree), d.maxIndex, INCREMENT)] = newNode
-			d.maxIndex++
+		d.insertAtIndexZero(newNode)
+
+		d.Unlock()
+		return newNode
+	} else if d.IsFull() {
+		d.evictMinNodeLockless()
+
+		if d.IsEmpty() {
+			d.insertAtIndexZero(newNode)
+
+			d.Unlock()
+			return newNode
 		}
-	} else {
-		// TODO(ian): Need to handle percolations.
 	}
+
+	nextIndex := 0
+	if compareTimeouts(d.Tree[d.maxIndex].Timeout, newNode.Timeout) {
+		nextIndex = safeIndex(cap(d.Tree), d.minIndex, DECREMENT)
+		d.minIndex = nextIndex
+	} else {
+		nextIndex = safeIndex(cap(d.Tree), d.maxIndex, INCREMENT)
+		d.maxIndex = nextIndex
+	}
+
+	d.Tree[nextIndex] = newNode
+	d.keyLookup[newNode.Key] = nextIndex
 
 	d.Unlock()
 	return newNode
 }
 
+func (d *BinheapOptimized) insertAtIndexZero(newNode *Node) *Node {
+	d.Tree[0] = newNode
+	d.maxIndex = 0
+	d.minIndex = 0
+	d.keyLookup[newNode.Key] = 0
+
+	return newNode
+}
+
 func (d *BinheapOptimized) EvictMinNode() *Node {
 	d.Lock()
-	minNode := d.Tree[d.maxIndex]
+	minNode := d.evictMinNodeLockless()
+	d.Unlock()
 
-	d.Tree[d.maxIndex] = nil
-	d.maxIndex++
+	return minNode
+}
+
+func (d *BinheapOptimized) evictMinNodeLockless() *Node {
+	minNode := d.Tree[d.minIndex]
+
+	d.Tree[d.minIndex] = nil
+
+	nextIndex := 0
+	if !d.IsEmpty() {
+		nextIndex = safeIndex(cap(d.Tree), d.minIndex, INCREMENT)
+	}
+	d.minIndex = nextIndex
 	delete(d.keyLookup, minNode.Key)
 
-	d.Unlock()
 	return minNode
 }
 
@@ -115,14 +135,14 @@ func (d *BinheapOptimized) IsEmpty() bool {
 	return d.maxIndex == d.minIndex && d.Tree[d.maxIndex] == nil
 }
 
+func (d *BinheapOptimized) IsFull() bool {
+	return d.maxIndex == d.minIndex && d.Tree[d.maxIndex] != nil && d.Tree[d.minIndex] != nil
+}
+
 // ReAllocate Handles increasing the size of the underlying binary heap.
 func (d *BinheapOptimized) ReAllocate(maxSize int) {
-	d.Lock()
-
 	// TODO(ian): If `maxSize` decreases, we should do something!
 	d.Tree = append(d.Tree, make([]*Node, maxSize)...)
-
-	d.Unlock()
 }
 
 // UpdateNodeTimeout allows changing of the keys Timeout in the
@@ -136,10 +156,11 @@ func (d *BinheapOptimized) UpdateNodeTimeout(key string) *Node {
 	d.Tree[nodeIndex].Timeout = time.Now().UTC()
 
 	if nodeIndex+1 < d.CurrentSize() {
+		// TODO(ian): Finish these percolation methods.
 		if d.compareTwoTimes(nodeIndex, nodeIndex+1) {
-			d.percolateDown(nodeIndex)
+			// d.percolateDown(nodeIndex)
 		} else if d.compareTwoTimes(nodeIndex-1, nodeIndex) {
-			d.percolateUp(nodeIndex)
+			// d.percolateUp(nodeIndex)
 		}
 	}
 
@@ -179,83 +200,6 @@ func (d *BinheapOptimized) CurrentSize() int {
 // _before_ the right (j) we return a False.
 func (h *BinheapOptimized) compareTwoTimes(i int, j int) bool {
 	return compareTimeouts(h.Tree[i].Timeout, h.Tree[j].Timeout)
-}
-
-// percolateUp handles sorting a newly inserted node into its correct position.
-// It's very unlikely this function actually ever does anything, as it's only
-// called by `Insert`, so newly inserted nodes don't typically have an
-// expiration time sooner than nodes already living in the heap.
-func (d *BinheapOptimized) percolateUp(newNodeIndex int) {
-	d.Lock()
-
-	if newNodeIndex == 0 {
-		return
-	}
-
-	// Unlikely to ever do anyttmpHeap.ng.
-	for {
-		if newNodeIndex == 0 {
-			break
-		}
-
-		newlyInsertedNode := d.Tree[newNodeIndex]
-		preExistingNode := d.Tree[newNodeIndex-1]
-
-		if preExistingNode.Timeout.Sub(newlyInsertedNode.Timeout) > 0 {
-			d.swapTwoNodes(newNodeIndex, newNodeIndex-1)
-			newNodeIndex--
-		} else {
-			break
-		}
-	}
-
-	d.Unlock()
-}
-
-// percolateDown handles moving a node starting at index `fromIndex` down into
-// its correct spot in the binary heap.
-func (d *BinheapOptimized) percolateDown(fromIndex int) {
-	d.Lock()
-	if fromIndex == len(d.Tree)-1 {
-		return
-	}
-
-	for {
-		if fromIndex == len(d.Tree)-1 {
-			break
-		}
-
-		// trackerNode is the node which we're currently tracking as it percolates
-		// down the binary heap.
-		trackerNode := d.Tree[fromIndex]
-
-		// If our tracker node is nil (meaning it was the slot of the recently
-		// evited min node) we want to automatically percolate it to the bottom of
-		// the binary heap.
-		if trackerNode == nil {
-			for i := 0; i < len(d.Tree)-1; i++ {
-				d.swapTwoNodes(i, i+1)
-			}
-			break
-		}
-
-		// preExistingNode is _any_ node which we're not currently tracking.
-		preExistingNode := d.Tree[fromIndex+1]
-		// NOTE: I'm not using `compareTwoTimes` here because I think it makes it
-		// more readable. I know this is an aggregious abuse of intermediary state
-		// or some other nonsense, but it makes it easier for me to read.
-
-		// Unlikely to ever do anything. But it asserts that the minimum
-		if trackerNode.Timeout.Sub(preExistingNode.Timeout) > 0 {
-			d.swapTwoNodes(fromIndex, fromIndex+1)
-			fromIndex++
-			continue
-		} else {
-			break
-		}
-	}
-
-	d.Unlock()
 }
 
 // swapTwoNodes swaps j into i and vice versa. Moreover, it handles updating

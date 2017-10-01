@@ -7,6 +7,85 @@ import (
 	"time"
 )
 
+func TestSafeIndexIncrement(t *testing.T) {
+	retval := safeIndex(100, 5, INCREMENT)
+
+	if retval != 6 {
+		t.Errorf("Expected %v, got %v", 6, retval)
+	}
+}
+
+func TestSafeIndexDecrement(t *testing.T) {
+	retval := safeIndex(100, 5, DECREMENT)
+
+	if retval != 4 {
+		t.Errorf("Expected %v, got %v", 4, retval)
+	}
+}
+
+func TestSafeIndexDecrementToZero(t *testing.T) {
+	retval := safeIndex(100, 1, DECREMENT)
+
+	if retval != 0 {
+		t.Errorf("Expected %v, got %v", 0, retval)
+	}
+}
+
+func TestSafeIndexIncrementOffZero(t *testing.T) {
+	retval := safeIndex(100, 0, INCREMENT)
+
+	if retval != 1 {
+		t.Errorf("Expected %v, got %v", 1, retval)
+	}
+}
+
+func TestIsEmpty(t *testing.T) {
+	testHeap := NewBinheapOptimized(10)
+
+	if testHeap.IsEmpty() != true {
+		t.Errorf("Expected an empty heap, got %v", testHeap)
+	}
+}
+
+func TestIsEmptyHasNode(t *testing.T) {
+	testHeap := NewBinheapOptimized(1)
+	testNode := NewNode("Testswap", time.Now().UTC())
+
+	testHeap.Insert(testNode)
+
+	if testHeap.IsEmpty() == true {
+		t.Errorf("Expected a non-empty heap, got %v", testHeap)
+	}
+}
+
+func TestPeek(t *testing.T) {
+	testHeap := NewBinheapOptimized(10)
+	testNode := NewNode("TestingNewNodeKey", time.Now().UTC())
+
+	testHeap.Insert(testNode)
+
+	retval, err := testHeap.Peek(0)
+	if err != nil {
+		t.Errorf("Expected nil error, got %v", err)
+	}
+
+	if retval.Key != "TestingNewNodeKey" {
+		t.Errorf("Expected %v, got %v", testNode.Key, retval.Key)
+	}
+}
+
+func TestPeekFailIndexTooLarge(t *testing.T) {
+	testHeap := NewBinheapOptimized(10)
+	testNode := NewNode("TestingNewNodeKey", time.Now().UTC())
+
+	testHeap.Insert(testNode)
+
+	retval, err := testHeap.Peek(4)
+	if err == nil {
+		t.Errorf("Expected non-nil error, got nil -- %v", retval)
+	}
+}
+
 func TestNewNode(t *testing.T) {
 	expectedReturn := Node{
 		Key:     "TestingNewNodeKey",
@@ -44,18 +123,39 @@ func TestNewBinheap(t *testing.T) {
 	}
 }
 
-func TestHeapInsertThenReallocate(t *testing.T) {
-	testHeap := NewBinheapOptimizedReallocate(1)
-	testNode := NewNode("TestHeapInsertThenReallocate", time.Now().UTC())
+func TestHeapInsertEmptyTree(t *testing.T) {
+	testHeap := NewBinheapOptimized(1)
+	testNode := NewNode("TestHeapInsertEmptyTree", time.Now().UTC())
 	time.Sleep(5 * time.Millisecond)
-	testNode2 := NewNode("TestHeapInsertThenReallocate2", time.Now().UTC())
+
+	testHeap.Insert(testNode)
+
+	if testHeap.Tree[0].Key != testNode.Key {
+		t.Errorf("Node didn't insert into index 0 for an empty tree",
+			testHeap,
+		)
+	}
+}
+
+func TestHeapInsertOverflow(t *testing.T) {
+	testHeap := NewBinheapOptimized(1)
+	testNode := NewNode("TestHeapInsertOverflow", time.Now().UTC())
+	time.Sleep(5 * time.Millisecond)
+	testNode2 := NewNode("TestHeapInsertOverflow2", time.Now().UTC())
 
 	testHeap.Insert(testNode)
 	testHeap.Insert(testNode2)
 
-	if len(testHeap.Tree) == 1 {
-		t.Errorf("Incorrect allocation strategy, heap didn't reallocate: %v",
-			testHeap,
+	if _, ok := testHeap.keyLookup[testNode2.Key]; !ok {
+		t.Errorf("Failed to find %v in keylookup after overwrite",
+			testHeap.Tree[0].Key,
+		)
+	}
+
+	if testHeap.Tree[0].Key != testNode2.Key {
+		t.Errorf("Incorrect overflow--didn't overwrite index 0. Expected %v, got %v",
+			testHeap.Tree[0].Key,
+			testNode.Key,
 		)
 	}
 }
@@ -109,95 +209,23 @@ func TestSwap(t *testing.T) {
 	}
 }
 
-func TestPercolateUp(t *testing.T) {
-	testHeap := NewBinheapOptimized(25)
-
-	originalNode := NewNode("Least expiration time", time.Now().UTC())
-	time.Sleep(50 * time.Millisecond)
-
-	for i := 0; i < 5; i++ {
-		testNode := NewNode(fmt.Sprintf("Node-%v", i), time.Now().UTC())
-		testHeap.Insert(testNode)
-		time.Sleep(5 * time.Millisecond)
-	}
-
-	testHeap.Insert(originalNode)
-
-	if testHeap.MinNode() != originalNode {
-		t.Errorf("Expected %v, got %v with a heap of %v",
-			originalNode,
-			testHeap.MinNode(),
-			testHeap.Tree,
-		)
-	}
-}
-
-func TestIsEmpty(t *testing.T) {
-	testHeap := NewBinheapOptimized(10)
-
-	if testHeap.IsEmpty() != true {
-		t.Errorf("Expected an empty heap, got %v", testHeap)
-	}
-}
-
-func TestIsEmptyHasNode(t *testing.T) {
-	testHeap := NewBinheapOptimizedReallocate(1)
-	testNode := NewNode("Testswap", time.Now().UTC())
-
-	testHeap.Insert(testNode)
-
-	if testHeap.IsEmpty() == true {
-		t.Errorf("Expected a non-empty heap, got %v", testHeap)
-	}
-}
-
-func TestPercolateDown(t *testing.T) {
-	testHeap := NewBinheapOptimizedReallocate(25)
-
-	for i := 0; i < 5; i++ {
-		testNode := NewNode(fmt.Sprintf("Node-%v", i), time.Now().UTC())
-		testHeap.Insert(testNode)
-		time.Sleep(5 * time.Millisecond)
-	}
-
-	for i := 0; i < 5; i++ {
-		expectedReturn := fmt.Sprintf("Node-%v", i)
-
-		if testHeap.MinNode().Key != expectedReturn {
-			t.Errorf("Expected %v, got %v with a heap of %v",
-				testHeap.MinNode().Key,
-				expectedReturn,
-				testHeap.Tree,
-			)
-		}
-
-		retVal := testHeap.EvictMinNode()
-
-		if retVal.Key != expectedReturn {
-			t.Errorf("[After Evict] Expected %v, got %v with a heap of %v",
-				retVal.Key,
-				expectedReturn,
-				testHeap.Tree,
-			)
-		}
-	}
-}
-
 func TestKeyLookup(t *testing.T) {
 	testHeap := NewBinheapOptimized(5)
 	testNode1 := NewNode("TestNode1", time.Now().UTC())
+	time.Sleep(5 * time.Millisecond)
 	testNode2 := NewNode("TestNode2", time.Now().UTC())
+	time.Sleep(5 * time.Millisecond)
 	testNode3 := NewNode("TestNode3", time.Now().UTC())
 
 	testHeap.Insert(testNode1)
 	testHeap.Insert(testNode2)
 	testHeap.Insert(testNode3)
 
-	node1Index := testHeap.keyLookup["TestNode1"]
-	node2Index := testHeap.keyLookup["TestNode2"]
-	node3Index := testHeap.keyLookup["TestNode3"]
+	node1Index := testHeap.keyLookup[testNode1.Key]
+	node2Index := testHeap.keyLookup[testNode2.Key]
+	node3Index := testHeap.keyLookup[testNode3.Key]
 
-	if node1Index != 0 {
+	if node1Index != 2 {
 		t.Errorf("Incorrect index for node1 %v", node1Index)
 	}
 
@@ -205,8 +233,8 @@ func TestKeyLookup(t *testing.T) {
 		t.Errorf("Incorrect index for node2 %v", node2Index)
 	}
 
-	if node3Index != 2 {
-		t.Errorf("Incorrect index for node2 %v", node3Index)
+	if node3Index != 0 {
+		t.Errorf("Incorrect index for node3 %v", node3Index)
 	}
 }
 
@@ -308,7 +336,7 @@ func TestKeyLookupReadjustsOnInsertion(t *testing.T) {
 }
 
 func TestKeyUpdateTimeoutDoesntBlowUpEverything(t *testing.T) {
-	testHeap := NewBinheapOptimizedReallocate(25)
+	testHeap := NewBinheapOptimized(25)
 
 	keyValues := make([]string, 25)
 	for i := 0; i < 25; i++ {
@@ -361,34 +389,49 @@ func TestCopy(t *testing.T) {
 	}
 }
 
-func TestSafeIndexIncrement(t *testing.T) {
-	retval := safeIndex(100, 5, INCREMENT)
+func TestGet(t *testing.T) {
+	testHeap := NewBinheapOptimized(10)
+	testNode := NewNode("TestingNewNodeKey", time.Now().UTC())
 
-	if retval != 6 {
-		t.Errorf("Expected %v, got %v", 6, retval)
+	testHeap.Insert(testNode)
+
+	retval, keyExists := testHeap.Get(testNode.Key)
+	if !keyExists {
+		t.Errorf("Expected %v, got %v", testNode, retval)
 	}
 }
 
-func TestSafeIndexDecrement(t *testing.T) {
-	retval := safeIndex(100, 5, DECREMENT)
+func TestGetFailInvalidKey(t *testing.T) {
+	testHeap := NewBinheapOptimized(10)
+	testNode := NewNode("TestingNewNodeKey", time.Now().UTC())
 
-	if retval != 4 {
-		t.Errorf("Expected %v, got %v", 4, retval)
+	testHeap.Insert(testNode)
+
+	retval, keyExists := testHeap.Get("INVALID_KEY")
+	if keyExists {
+		t.Errorf("Expected no key found, got %v", retval)
 	}
 }
 
-func TestSafeIndexDecrementToZero(t *testing.T) {
-	retval := safeIndex(100, 1, DECREMENT)
+func TestCurrentSize(t *testing.T) {
+	testHeap := NewBinheapOptimized(10)
+	testNode := NewNode("TestingNewNodeKey", time.Now().UTC())
 
+	testHeap.Insert(testNode)
+	testHeap.Insert(testNode)
+	testHeap.Insert(testNode)
+
+	retval := testHeap.CurrentSize()
+	if retval != 3 {
+		t.Errorf("Expected 3, got %v", retval)
+	}
+}
+
+func TestCurrentSizeEmpty(t *testing.T) {
+	testHeap := NewBinheapOptimized(10)
+
+	retval := testHeap.CurrentSize()
 	if retval != 0 {
-		t.Errorf("Expected %v, got %v", 0, retval)
-	}
-}
-
-func TestSafeIndexIncrementOffZero(t *testing.T) {
-	retval := safeIndex(100, 0, INCREMENT)
-
-	if retval != 1 {
-		t.Errorf("Expected %v, got %v", 1, retval)
+		t.Errorf("Expected 0, got %v", retval)
 	}
 }
